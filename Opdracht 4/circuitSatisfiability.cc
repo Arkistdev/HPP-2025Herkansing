@@ -18,6 +18,8 @@
 #include <iostream>
 #include <climits>
 #include <array>
+#include <mpi.h>
+#include <math.h>
 
 using std::cout;
 using std::endl;
@@ -44,30 +46,73 @@ int checkCircuit(int, input &);
 int main(int argc, char *argv[])
 {
    unsigned int i, combination; // loop variable (32 bits)
-   int id = -1;                 // process id
+   int id, numProcesses = -1;   // process id & numprocesses
    int count = 0;               // number of solutions
+
+   MPI_Init(&argc, &argv);
+   MPI_Comm_rank(MPI_COMM_WORLD, &id);
+   MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
 
    input v;
    double startTime, totalTime = 0.0;
-   // startTime = MPI_Wtime();
+   startTime = MPI_Wtime();
+
+   // ---- Gedeeltelijk CODE VAN parallelLoopChunks.cc ----
+   unsigned int chunkSize = UINT_MAX;
+   int remainder = 0;
+
+   if (numProcesses > 1)
+   {
+      chunkSize = (int)ceil(UINT_MAX / numProcesses);
+      remainder = UINT_MAX % numProcesses;
+   }
+
+   unsigned int start, stop;
+
+   if (remainder == 0 || (remainder != 0 && id < remainder))
+   {
+      start = id * chunkSize;
+      stop = start + chunkSize;
+   }
+   else
+   {
+      // chunk size to spread among rest of processes
+      int chunkSize2 = chunkSize - 1;
+      // decrease chunk size by one to spread out across remaining
+      // processes whose id is >= remainder
+      start = (remainder * chunkSize) + (chunkSize2 * (id - remainder));
+      stop = start + chunkSize2;
+   }
+   // ----------------------------------------
 
    cout << endl
-        << "Process " << id << " is checking the circuit..." << endl;
+        << "Process " << id << " is checking the circuit from " << start << " until " << stop << "..." << endl;
 
-   for (combination = 0; combination < UINT_MAX; combination++)
-   {
+   for (combination = start; combination < stop; combination++)
+   { // iterate through our range
+
+      // cout << "(" << id << ")" << " Checking combination: " << combination << endl;
       for (i = 0; i < SIZE; i++)
          v[i] = EXTRACT_BIT(combination, i);
 
       count += checkCircuit(id, v);
    }
 
-   // totalTime = MPI_Wtime() - startTime;
-
    cout << "Process " << id << " finished." << endl;
    cout << "A total of " << count << " solutions were found." << endl
         << endl;
-   // cout << "Time taken " << totalTime << "s" << endl;
+
+   int globalCount;
+   MPI_Reduce(&count, &globalCount, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+
+   if (id == 0)
+   {
+      totalTime = MPI_Wtime() - startTime;
+      cout << "Time taken " << totalTime << "s" << endl;
+      cout << "Total count: " << globalCount << endl;
+   }
+
+   MPI_Finalize();
    return 0;
 }
 
