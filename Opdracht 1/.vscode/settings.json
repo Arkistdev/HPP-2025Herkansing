@@ -1,0 +1,23 @@
+{
+    "makefile.launchConfigurations": [
+        {
+            "cwd": "c:\\Users\\maste\\Documents\\HPP\\les_1",
+            "binaryPath": "c:\\Users\\maste\\Documents\\HPP\\les_1\\main",
+            "binaryArgs": []
+        },
+        {
+            "cwd": "c:\\Users\\maste\\Desktop\\School\\leerjaar 2\\blok C\\HPP\\les_1",
+            "binaryPath": "c:\\Users\\maste\\Desktop\\School\\leerjaar 2\\blok C\\HPP\\les_1\\main",
+            "binaryArgs": []
+        }
+    ],
+    "files.associations": {
+        "ostream": "cpp",
+        "*.tcc": "cpp",
+        "string": "cpp",
+        "random": "cpp",
+        "iostream": "cpp",
+        "chrono": "cpp",
+        "cmath": "cpp"
+    }
+}

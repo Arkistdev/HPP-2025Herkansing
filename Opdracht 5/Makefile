@@ -13,6 +13,9 @@ ffmpeg:
 julia: main.cc frame.o animation.o consts.h
 	mpic++ -O2 $(LDFLAGS) -o julia main.cc frame.o animation.o --std=c++23
 
+julia_striped: main_striped.cc frame.o animation.o consts.h
+	mpic++ -O2 $(LDFLAGS) -o julia_striped main_striped.cc frame.o animation.o --std=c++23
+
 run: ffmpeg julia
 	mpirun -np $(or $(NP),4) ./julia
 

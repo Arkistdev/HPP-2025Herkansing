@@ -71,35 +71,6 @@ frame renderFrame(unsigned int t) {
   return f;
 }
 
-std::tuple<unsigned int, unsigned int> ChunkSize(int workerId, int nWorkers)
-{
-  unsigned int start, stop, remainder;
-  int chunkSize = FRAMES;
-
-  if (nWorkers > 1)
-  {
-      chunkSize = (int)ceil((double) FRAMES / nWorkers);
-      remainder = FRAMES % nWorkers;
-  }
-
-  if (remainder == 0 || (remainder != 0 && workerId < remainder))
-  {
-      start = workerId * chunkSize;
-      stop = start + chunkSize;
-  }
-  else
-  {
-      // chunk size to spread among rest of processes
-      int chunkSize2 = chunkSize - 1;
-      // decrease chunk size by one to spread out across remaining
-      // processes whose id is >= remainder
-      start = (remainder * chunkSize) + (chunkSize2 * (workerId - remainder));
-      stop = start + chunkSize2;
-  }
-
-  return std::make_tuple(start, stop);
-}
-
 int main (int argc, char *argv[]) {
   int id, numProcesses = -1;
 
@@ -112,24 +83,14 @@ int main (int argc, char *argv[]) {
   MPI_Type_contiguous(FRAME_SIZE, MPI_BYTE, &mpi_img);
   MPI_Type_commit(&mpi_img);
 
-  if (numProcesses < 2)
-  {
-    cout << "Please run this program with atleast 2 processing cores" << endl;
-    abort();
-  }
-
   frame next;
-  unsigned int start, stop;
   int nWorkers = numProcesses -1;
 
   if (id > 0)
   { // RENDER NODES
     int workerId = id -1;
-    auto [start, stop] = ChunkSize(workerId, nWorkers);
     
-    cout << "(" << workerId << ")" << " " << start << " - " << stop << endl;
-
-    for (unsigned int f = start; f < stop; f++) {
+    for (unsigned int f = workerId; f < FRAMES; f+= nWorkers) {
       frame next = renderFrame(f);
       
       MPI_Send(&next, 1, mpi_img, 0, 0, MPI_COMM_WORLD);
@@ -137,14 +98,11 @@ int main (int argc, char *argv[]) {
   }
   else
   { // ROOT NODE
-    unsigned int start, stop;
-
     double startTime, totalTime, memoryTotal, renderingTotal, savingTotal = 0.0;
     std::vector<unsigned int> framenr(nWorkers);
     for(int i = 0; i < nWorkers; i++)
     {
-      auto [start, stop] = ChunkSize(i, nWorkers); // keep track of frame number per process
-      framenr[i] = start;
+      framenr[i] = i;
     }
 
     startTime = MPI_Wtime();
@@ -159,7 +117,7 @@ int main (int argc, char *argv[]) {
       cout << "(" << iter << ")" << " Receiving frame nr " << framenr[proc] << endl;
       frames[(int)framenr[proc]] = next;
       iter++;
-      framenr[proc] += 1; // update frame number
+      framenr[proc] += nWorkers; // update frame number
       proc = (proc + 1) % nWorkers; // cycle processes
     }
     
