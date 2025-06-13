@@ -31,35 +31,140 @@ inline constexpr pixel COLOURISE(double iter) {
   return { r, g, b };
 }
 
-void renderFrame(animation &frames, unsigned int t, unsigned int offset) {
+frame renderFrame(unsigned int t) {
   // TODO - render frame t and store in frames[t-offset]
+  frame f = frame();
+  double a = 2 * std::numbers::pi * t / CYCLE_FRAMES;
+  double r = 0.7885;
+  std::complex<double> c = r * cos(a) + static_cast<std::complex<double>>(1i) * r * sin(a);
+  double x_y_range = 2;
+
+  // Set colour for every pixel
+  #pragma omp parallel for collapse(2) num_threads(NUM_THREADS)
+  for (int x = 0; x < WIDTH; x++)
+  {
+    for (int y = 0; y < HEIGHT; y++)
+    {
+      std::complex<double> z = 2 * x_y_range * std::complex(static_cast<double>(x)/WIDTH, static_cast<double>(y)/HEIGHT) - std::complex(x_y_range*3/4, x_y_range);
+
+      double iteration = 0;
+
+      while (std::norm(z) < x_y_range && iteration < MAX_ITER)
+      {
+        z = std::pow(z, 2) + c;
+        iteration += 1;
+      }
+
+      if (iteration == MAX_ITER)
+      {
+        f.set_colour(x, y, pixel{0, 0, 0});
+      }
+      else
+      {
+        f.set_colour(x, y, COLOURISE(iteration));
+      }
+    }
+  }
+
+  return f;
 }
 
 int main (int argc, char *argv[]) {
+  int id, numProcesses = -1;
+
   MPI_Init(&argc, &argv);
+  MPI_Comm_rank(MPI_COMM_WORLD, &id);
+  MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
 
   // Needed to send frames over MPI
   MPI_Datatype mpi_img;
   MPI_Type_contiguous(FRAME_SIZE, MPI_BYTE, &mpi_img);
   MPI_Type_commit(&mpi_img);
 
-  animation frames(FRAMES);
-
   // TODO - parallellisation
-  for (unsigned int f = 0; f < FRAMES; f++) {
-    cout << endl << "Rendering frame " << f << endl;
-    renderFrame(frames, f, 0);
-  }
+  frame next;
+  int chunkSize = FRAMES;
+  unsigned int start, stop;
+  int framenr, remainder;
+  int nWorkers = numProcesses -1;
 
-  cimg_library::CImg<byte> img(WIDTH,HEIGHT,FRAMES,3);
-  cimg_forXYZ(img, x, y, z) { 
-    img(x,y,z,RED) = (frames)[z].get_channel(x,y,RED);
-    img(x,y,z,GREEN) = (frames)[z].get_channel(x,y,GREEN);
-    img(x,y,z,BLUE) = (frames)[z].get_channel(x,y,BLUE);
-  }
+  if (id > 0)
+  { // RENDER NODES
+    int workerId = id - 1;
+    if (nWorkers > 1)
+    {
+        chunkSize = (int)ceil((double) FRAMES / nWorkers);
+        remainder = FRAMES % nWorkers;
+    }
 
-  std::string filename = std::string("animation.avi");
-  img.save_video(filename.c_str());
+    if (remainder == 0 || (remainder != 0 && workerId < remainder))
+    {
+        start = workerId * chunkSize;
+        stop = start + chunkSize;
+    }
+    else
+    {
+        // chunk size to spread among rest of processes
+        int chunkSize2 = chunkSize - 1;
+        // decrease chunk size by one to spread out across remaining
+        // processes whose id is >= remainder
+        start = (remainder * chunkSize) + (chunkSize2 * (workerId - remainder));
+        stop = start + chunkSize2;
+    }
+
+    cout << "(" << workerId << ")" << " " << start << " - " << stop << endl;
+
+    for (unsigned int f = start; f < stop; f++) {
+      // cout << "(" << workerId << ")" << " Rendering frame " << f << endl;
+      frame next = renderFrame(f);
+      framenr = f;
+      
+      MPI_Send(&next, 1, mpi_img, 0, 0, MPI_COMM_WORLD);
+      MPI_Send(&framenr, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+    }
+  }
+  else
+  { // ROOT NODE
+    double startTime, totalTime, memoryTotal, renderingTotal, savingTotal = 0.0;
+    startTime = MPI_Wtime();
+
+    
+    animation frames(FRAMES);
+    memoryTotal = MPI_Wtime() - startTime;
+
+    int iter = 0;
+    int dest = 0;
+    while(iter < FRAMES)
+    {
+      // cout << "(" << iter << ")" << " Trying to receive data from " << dest << endl;
+      MPI_Recv(&next, 1, mpi_img, dest + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);    // Get the frame
+      MPI_Recv(&framenr, 1, MPI_INT, dest + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); // Get the corresponding frame number
+      cout << "(" << iter << ")" << " Receiving frame nr " << framenr << endl;
+      frames[framenr] = next;
+      iter++;
+      dest = (dest + 1) % nWorkers;
+    }
+    
+    renderingTotal = MPI_Wtime() - startTime - memoryTotal;
+
+    cimg_library::CImg<byte> img(WIDTH,HEIGHT,FRAMES,3);
+    cimg_forXYZ(img, x, y, z) { 
+      img(x,y,z,RED) = (frames)[z].get_channel(x,y,RED);
+      img(x,y,z,GREEN) = (frames)[z].get_channel(x,y,GREEN);
+      img(x,y,z,BLUE) = (frames)[z].get_channel(x,y,BLUE);
+    }
+
+    std::string filename = std::string("animation.avi");
+    img.save_video(filename.c_str());
+    savingTotal = MPI_Wtime() - startTime - memoryTotal - renderingTotal;
+
+
+    totalTime = MPI_Wtime() - startTime;
+    cout << "Memory time taken \t" << memoryTotal << "s" << endl;
+    cout << "Redering time taken \t" << renderingTotal << "s" << endl;
+    cout << "Saving time taken \t" << savingTotal << "s" << endl;
+    cout << "Total time taken \t" << totalTime << "s" << endl;
+  }
 
   // Also needed to send frames over MPI
   MPI_Type_free(&mpi_img);
