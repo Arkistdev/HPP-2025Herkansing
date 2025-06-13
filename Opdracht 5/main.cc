@@ -46,6 +46,8 @@ frame renderFrame(unsigned int t) {
     for (int y = 0; y < HEIGHT; y++)
     {
       std::complex<double> z = 2 * x_y_range * std::complex(static_cast<double>(x)/WIDTH, static_cast<double>(y)/HEIGHT) - std::complex(x_y_range*3/4, x_y_range);
+      double scale = 1.5 - 1.45 * log(1 + 9.0 * t / FRAMES) / log(10);
+      z *= scale;
 
       double iteration = 0;
 
